@@ -1,17 +1,18 @@
 import io
 import cv2
-from fastapi import FastAPI, UploadFile, File, HTTPException, status, Depends
+from fastapi import FastAPI, UploadFile, File, HTTPException, status, Depends, Query
 from fastapi.responses import Response
 import numpy as np
 from functools import cache
 from PIL import Image, UnidentifiedImageError
-from src.predictor import GunDetector, Detection, Segmentation, annotate_detection, annotate_segmentation
+from src.predictor import GunDetector, Detection, annotate_detection, annotate_segmentation
 from src.config import get_settings
+from src.models import Gun, Person, PixelLocation
 
 SETTINGS = get_settings()
 
 app = FastAPI(title=SETTINGS.api_name, version=SETTINGS.revision)
-
+detector = GunDetector()
 
 @cache
 def get_gun_detector() -> GunDetector:
@@ -73,6 +74,73 @@ def annotate_guns(
     image_stream.seek(0)
     return Response(content=image_stream.read(), media_type="image/jpeg")
 
+def read_image(file: UploadFile) -> np.ndarray:
+    img_bytes = file.file.read()
+    img_array = np.frombuffer(img_bytes, np.uint8)
+    return cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+
+@app.post("/annotate_people")
+async def annotate_people(file: UploadFile = File(...), draw_boxes: bool = Query(True)):
+    img = read_image(file)
+    seg = detector.segment_people(img)
+    annotated = annotate_segmentation(img, seg, draw_boxes)
+    _, buf = cv2.imencode('.jpg', annotated)
+    return Response(content=buf.tobytes(), media_type="image/jpeg")
+
+@app.post("/detect_people")
+async def detect_people(file: UploadFile = File(...)):
+    img = read_image(file)
+    seg = detector.segment_people(img)
+    return seg
+
+@app.post("/detect")
+async def detect(file: UploadFile = File(...)):
+    img = read_image(file)
+    det = detector.detect_guns(img)
+    seg = detector.segment_people(img)
+    return {"detection": det, "segmentation": seg}
+
+@app.post("/annotate")
+async def annotate(file: UploadFile = File(...), draw_boxes: bool = Query(True)):
+    img = read_image(file)
+    det = detector.detect_guns(img)
+    seg = detector.segment_people(img)
+    img_det = annotate_detection(img, det)
+    img_seg = annotate_segmentation(img_det, seg, draw_boxes)
+    _, buf = cv2.imencode('.jpg', img_seg)
+    return Response(content=buf.tobytes(), media_type="image/jpeg")
+
+@app.post("/guns")
+async def guns(file: UploadFile = File(...)):
+    img = read_image(file)
+    det = detector.detect_guns(img)
+    guns = []
+    for label, box in zip(det.labels, det.boxes):
+        x1, y1, x2, y2 = box
+        cx, cy = int((x1 + x2) / 2), int((y1 + y2) / 2)
+        guns.append(Gun(gun_type=label.lower(), location=PixelLocation(x=cx, y=cy)))
+    return guns
+
+@app.post("/people")
+async def people(file: UploadFile = File(...)):
+    img = read_image(file)
+    seg = detector.segment_people(img)
+    persons = []
+    for poly, label in zip(seg.polygons, seg.labels):
+        poly_np = np.array(poly, np.int32)
+        M = cv2.moments(poly_np)
+        if M["m00"] != 0:
+            cx = int(M["m10"] / M["m00"])
+            cy = int(M["m01"] / M["m00"])
+        else:
+            cx, cy = poly_np[0]
+        area = cv2.contourArea(poly_np)
+        persons.append(Person(
+            person_type=label,
+            location=PixelLocation(x=cx, y=cy),
+            area=int(area)
+        ))
+    return persons
 
 if __name__ == "__main__":
     import uvicorn
