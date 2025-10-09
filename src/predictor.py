@@ -97,7 +97,7 @@ class GunDetector:
             confidences=confidences,
         )
     
-    def segment_people(self, image_array: np.ndarray, threshold: float = 0.5, max_distance: int = 10):
+    def segment_people(self, image_array: np.ndarray, threshold: float = 0.9, max_distance: int = 10):
         seg_results = self.seg_model(image_array, conf=threshold, task='segment')[0]
         polygons = []
         boxes = []

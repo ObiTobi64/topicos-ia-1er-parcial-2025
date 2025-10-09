@@ -80,40 +80,57 @@ def read_image(file: UploadFile) -> np.ndarray:
     return cv2.imdecode(img_array, cv2.IMREAD_COLOR)
 
 @app.post("/annotate_people")
-async def annotate_people(file: UploadFile = File(...), draw_boxes: bool = Query(True)):
+async def annotate_people(
+    file: UploadFile = File(...),
+    draw_boxes: bool = Query(True),
+    threshold: float = Query(0.5)
+):
     img = read_image(file)
-    seg = detector.segment_people(img)
+    seg = detector.segment_people(img, threshold=threshold)
     annotated = annotate_segmentation(img, seg, draw_boxes)
     _, buf = cv2.imencode('.jpg', annotated)
     return Response(content=buf.tobytes(), media_type="image/jpeg")
 
 @app.post("/detect_people")
-async def detect_people(file: UploadFile = File(...)):
+async def detect_people(
+    file: UploadFile = File(...),
+    threshold: float = Query(0.5)
+):
     img = read_image(file)
-    seg = detector.segment_people(img)
+    seg = detector.segment_people(img, threshold=threshold)
     return seg
 
 @app.post("/detect")
-async def detect(file: UploadFile = File(...)):
+async def detect(
+    file: UploadFile = File(...),
+    threshold: float = Query(0.5)
+):
     img = read_image(file)
-    det = detector.detect_guns(img)
-    seg = detector.segment_people(img)
+    det = detector.detect_guns(img, threshold=threshold)
+    seg = detector.segment_people(img, threshold=threshold)
     return {"detection": det, "segmentation": seg}
 
 @app.post("/annotate")
-async def annotate(file: UploadFile = File(...), draw_boxes: bool = Query(True)):
+async def annotate(
+    file: UploadFile = File(...),
+    draw_boxes: bool = Query(True),
+    threshold: float = Query(0.5)
+):
     img = read_image(file)
-    det = detector.detect_guns(img)
-    seg = detector.segment_people(img)
+    det = detector.detect_guns(img, threshold=threshold)
+    seg = detector.segment_people(img, threshold=threshold)
     img_det = annotate_detection(img, det)
     img_seg = annotate_segmentation(img_det, seg, draw_boxes)
     _, buf = cv2.imencode('.jpg', img_seg)
     return Response(content=buf.tobytes(), media_type="image/jpeg")
 
 @app.post("/guns")
-async def guns(file: UploadFile = File(...)):
+async def guns(
+    file: UploadFile = File(...),
+    threshold: float = Query(0.5)
+):
     img = read_image(file)
-    det = detector.detect_guns(img)
+    det = detector.detect_guns(img, threshold=threshold)
     guns = []
     for label, box in zip(det.labels, det.boxes):
         x1, y1, x2, y2 = box
@@ -122,9 +139,12 @@ async def guns(file: UploadFile = File(...)):
     return guns
 
 @app.post("/people")
-async def people(file: UploadFile = File(...)):
+async def people(
+    file: UploadFile = File(...),
+    threshold: float = Query(0.5)
+):
     img = read_image(file)
-    seg = detector.segment_people(img)
+    seg = detector.segment_people(img, threshold=threshold)
     persons = []
     for poly, label in zip(seg.polygons, seg.labels):
         poly_np = np.array(poly, np.int32)
